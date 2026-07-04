@@ -5,7 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Main Kontakt Addon Class
+ * Main Post Slider Addon Class
  *
  * The main class that initiates and runs the plugin.
  *
@@ -22,7 +22,7 @@ final class Psea_elementor_init {
 	 *
 	 * @var string The plugin version.
 	 */
-	const VERSION = '1.0.0';
+	const VERSION = '2.1.0';
 
 	/**
 	 * Minimum Elementor Version
@@ -30,8 +30,12 @@ final class Psea_elementor_init {
 	 * @since 1.0.0
 	 *
 	 * @var string Minimum Elementor version required to run the plugin.
+	 *
+	 * Raised to 3.5.0 because the widget now registers via the
+	 * "elementor/widgets/register" hook, which replaced the removed
+	 * "elementor/widgets/widgets_registered" hook in Elementor 3.5.
 	 */
-	const MINIMUM_ELEMENTOR_VERSION = '2.0.0';
+	const MINIMUM_ELEMENTOR_VERSION = '3.5.0';
 
 	/**
 	 * Minimum PHP Version
@@ -40,7 +44,7 @@ final class Psea_elementor_init {
 	 *
 	 * @var string Minimum PHP version required to run the plugin.
 	 */
-	const MINIMUM_PHP_VERSION = '5.4';
+	const MINIMUM_PHP_VERSION = '7.4';
 
 	/**
 	 * Instance
@@ -50,7 +54,7 @@ final class Psea_elementor_init {
 	 * @access private
 	 * @static
 	 *
-	 * @var Kontakt_elementor The single instance of the class.
+	 * @var Psea_elementor_init The single instance of the class.
 	 */
 	private static $_instance = null;
 
@@ -64,7 +68,7 @@ final class Psea_elementor_init {
 	 * @access public
 	 * @static
 	 *
-	 * @return Kontakt_elementor An instance of the class.
+	 * @return Psea_elementor_init An instance of the class.
 	 */
 	public static function instance() {
 
@@ -126,8 +130,10 @@ final class Psea_elementor_init {
 
 		add_action( 'elementor/elements/categories_registered', array($this,'_widget_categories') );
 
-		//elementor widget registered
-		add_action('elementor/widgets/widgets_registered',array($this,'_widget_registered'));
+		// "elementor/widgets/widgets_registered" was removed in Elementor 3.5+
+		// in favor of "elementor/widgets/register", which passes the widgets
+		// manager in directly instead of requiring Plugin::instance() lookups.
+		add_action('elementor/widgets/register', array($this,'_widget_registered'));
 
 
 
@@ -227,14 +233,54 @@ final class Psea_elementor_init {
 
 		/**
 		 * _widget_registered()
+		 *
 		 * @since 1.0.0
+		 * @since 2.1.0 Now receives $widgets_manager (from the modern
+		 *              "elementor/widgets/register" hook) and calls its
+		 *              register() method directly, instead of the widget file
+		 *              self-registering via the removed register_widget_type().
+		 * @since 2.2.0 Loops the shared registry (psea_widget_registry()) and
+		 *              skips widgets switched off in the Widget Manager, so
+		 *              adding a widget never means editing this file again.
+		 *
+		 * @param \Elementor\Widgets_Manager $widgets_manager Elementor widgets manager.
 		 * */
-		public function _widget_registered(){
-			
-			if ( file_exists( PSEA_ELEMENTOR.'/psea-post-slider.php' ) ){
-					require_once PSEA_ELEMENTOR.'/psea-post-slider.php';
+		public function _widget_registered( $widgets_manager ) {
+
+			// Shared abstract base every pack widget extends.
+			if ( file_exists( PSEA_ELEMENTOR . '/class-psea-widget-base.php' ) ) {
+				require_once PSEA_ELEMENTOR . '/class-psea-widget-base.php';
+			}
+
+			$registry = function_exists( 'psea_widget_registry' ) ? psea_widget_registry() : array();
+
+			foreach ( $registry as $slug => $w ) {
+
+				if ( class_exists( 'Psea_Settings' ) && ! Psea_Settings::is_enabled( $slug ) ) {
+					continue; // switched off in the Widget Manager.
 				}
 
+				$file = PSEA_ELEMENTOR . '/' . $w['file'];
+				if ( ! file_exists( $file ) ) {
+					continue;
+				}
+				require_once $file;
+
+				if ( ! class_exists( $w['class'] ) ) {
+					continue;
+				}
+
+				// A single misbehaving widget must never take the rest of the
+				// pack down with it (or silently vanish with no trace) — log
+				// and move on to the next one instead.
+				try {
+					$widgets_manager->register( new $w['class']() );
+				} catch ( \Throwable $e ) {
+					if ( function_exists( 'error_log' ) ) {
+						error_log( sprintf( '[Post Slider Addons] Failed to register widget "%s": %s', $slug, $e->getMessage() ) );
+					}
+				}
+			}
 		}
 }
 

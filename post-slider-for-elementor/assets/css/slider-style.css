@@ -1,6 +1,13 @@
 #slider{
   margin:0;
-  padding:0; 
+  padding:0;
+}
+.psea-no-posts{
+  margin:0;
+  padding:20px;
+  text-align:center;
+  color:#888;
+  background:#f6f6f6;
 }
 .skdslider{
 	max-height: 90vh;
